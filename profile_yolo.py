@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import time
@@ -13,7 +14,7 @@ from Monsoon import sampleEngine
 # ============================================================
 # 1. Load the REAL image ONCE (disk I/O excluded from timing)
 # ============================================================
-image_path = "/path/to/your/test_image.jpg"  # <-- CHANGE THIS
+image_path = os.path.join(os.path.dirname(__file__), "test.jpg")
 img_bgr = cv2.imread(image_path)
 if img_bgr is None:
     raise FileNotFoundError(f"Image not found at {image_path}")

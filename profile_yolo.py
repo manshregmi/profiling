@@ -56,7 +56,7 @@ def get_model_path():
 # ============================================================
 # 1. Load image (modify path as needed)
 # ============================================================
-image_path = "test.jpg"   # <-- CHANGE THIS to your image path
+image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test.jpg')  # <-- REPLACE with your image path
 img_bgr = cv2.imread(image_path)
 if img_bgr is None:
     raise FileNotFoundError(f"Image not found: {image_path}")

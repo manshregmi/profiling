@@ -1,15 +1,63 @@
-import os
 import torch
 import numpy as np
 import time
 import cv2
 import csv
+import os
+import subprocess
+import sys
 from datetime import datetime
 from ultralytics import YOLO
 
-# --- Monsoon Power Monitor imports (FIXED) ---
+# --- Monsoon Power Monitor imports ---
 import Monsoon
 from Monsoon import sampleEngine
+
+# ============================================================
+# 0. Helper function to ensure model weights are present and valid
+# ============================================================
+def get_model_path():
+    """Return the path to yolov13n.pt, downloading it if missing or corrupt."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    weights_dir = os.path.join(script_dir, 'weights')
+    model_path = os.path.join(weights_dir, 'yolov13n.pt')
+
+    os.makedirs(weights_dir, exist_ok=True)
+
+    # Check if file exists and is valid
+    def is_valid_model(path):
+        if not os.path.isfile(path):
+            return False
+        try:
+            # Try to load the state dict
+            torch.load(path, map_location='cpu')
+            return True
+        except Exception:
+            return False
+
+    if is_valid_model(model_path):
+        print(f"✅ Model found and verified: {model_path}")
+        return model_path
+
+    # If not valid, download it
+    print(f"⚠️  Model file missing or corrupt. Downloading from Ultralytics assets...")
+    url = "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov13n.pt"
+    try:
+        subprocess.check_call(['wget', '--progress=dot:giga', '-O', model_path, url])
+    except Exception as e:
+        print(f"❌ Download failed: {e}")
+        print("Please download manually from:")
+        print(url)
+        print(f"and place it at: {model_path}")
+        sys.exit(1)
+
+    # Verify again after download
+    if is_valid_model(model_path):
+        print(f"✅ Model downloaded and verified: {model_path}")
+        return model_path
+    else:
+        print(f"❌ Downloaded file is still corrupt. Please delete it and try again.")
+        sys.exit(1)
 
 # ============================================================
 # 1. Load the REAL image ONCE (disk I/O excluded from timing)
@@ -20,14 +68,15 @@ if img_bgr is None:
     raise FileNotFoundError(f"Image not found at {image_path}")
 
 # ============================================================
-# 2. Initialize YOLO model on GPU
+# 2. Initialize YOLO model with verified weights
 # ============================================================
-model = YOLO('yolov13n.pt')
+model_path = get_model_path()
+model = YOLO(model_path)
 model.to('cuda:0')
 input_size = 640
 
 # ============================================================
-# 3. Initialize Monsoon High Voltage Power Monitor (FIXED)
+# 3. Initialize Monsoon High Voltage Power Monitor
 # ============================================================
 HVPMSerialNo = 12345  # Replace with your Monsoon's serial number
 
@@ -146,7 +195,7 @@ std_yolo_pwr = np.std(yolo_power_readings)
 total_avg_lat = avg_preprocess_lat + avg_yolo_lat
 
 # ============================================================
-# 10. Save results to CSV (unchanged)
+# 10. Save results to CSV
 # ============================================================
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 

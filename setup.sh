@@ -3,7 +3,7 @@
 # Optimized for NVIDIA Orin NX with JetPack 6.2.2
 # Usage: chmod +x setup.sh && ./setup.sh
 
-set -e  # Exit on any error
+set -e
 
 echo "=============================================="
 echo "  YOLOv13 + Monsoon Profiling Setup Script   "
@@ -43,38 +43,16 @@ else
 fi
 
 # ----------------------------------------------------------------------
-# 4. Install PyTorch for JetPack 6.2.2 (community build)
+# 4. Install PyTorch from Jetson AI Lab (CUDA-enabled)
 # ----------------------------------------------------------------------
-echo "[4/8] Installing PyTorch (cuDNN 9.3 compatible)..."
-wget -q https://github.com/YeQiao/pytorch-jetson-orin-nano/releases/download/v2.3.0-jetson/pytorch-2.3.0-jetson-orin-nano.tar.gz -O /tmp/pytorch-jetson.tar.gz
-if [ -f /tmp/pytorch-jetson.tar.gz ]; then
-    tar -xzf /tmp/pytorch-jetson.tar.gz -C /tmp/
-    cd /tmp/pytorch-jetson-dist
-    ./install_pytorch.sh
-    cd -
-    rm -f /tmp/pytorch-jetson.tar.gz
-    rm -rf /tmp/pytorch-jetson-dist
-    echo "    ✅ PyTorch installed"
-else
-    echo "    ⚠️  Community build failed. Trying davidl-nv wheel..."
-    wget -q https://github.com/davidl-nv/torch/raw/refs/heads/main/torch-2.8/torch-2.8.0-cp310-cp310-linux_aarch64.whl -O /tmp/torch.whl
-    wget -q https://github.com/davidl-nv/torch/raw/refs/heads/main/torch-2.8/torchvision-0.23.0-cp310-cp310-linux_aarch64.whl -O /tmp/torchvision.whl
-    if [ -f /tmp/torch.whl ]; then
-        python3 -m pip install /tmp/torch.whl
-        [ -f /tmp/torchvision.whl ] && python3 -m pip install /tmp/torchvision.whl
-        rm -f /tmp/torch.whl /tmp/torchvision.whl
-        echo "    ✅ PyTorch installed"
-    else
-        echo "    ❌ All PyTorch methods failed. Please install manually."
-        exit 1
-    fi
-fi
+echo "[4/8] Installing PyTorch with CUDA support for JetPack 6.2..."
+pip3 install --pre torch torchvision --index-url https://pypi.jetson-ai-lab.dev/jp6/cu126
 
 # ----------------------------------------------------------------------
 # 5. Install Python dependencies (excluding PyTorch)
 # ----------------------------------------------------------------------
 echo "[5/8] Installing Python packages..."
-python3 -m pip install numpy opencv-python ultralytics Monsoon pyusb libusb1
+pip3 install numpy opencv-python ultralytics Monsoon pyusb libusb1
 
 # ----------------------------------------------------------------------
 # 6. Set up Monsoon USB permissions
@@ -91,7 +69,9 @@ sudo usermod -a -G plugdev $USER
 echo "[7/8] Downloading YOLOv13n model weights..."
 mkdir -p weights
 cd weights
+
 MODEL_URL="https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13n.pt"
+
 if [ -f yolov13n.pt ]; then
     echo "    ⚠️  Model already exists. Verifying..."
     if python3 -c "import torch; torch.load('yolov13n.pt', map_location='cpu')" 2>/dev/null; then

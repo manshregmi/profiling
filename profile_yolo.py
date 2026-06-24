@@ -1,4 +1,3 @@
-import os
 import torch
 import numpy as np
 import time
@@ -7,14 +6,14 @@ import csv
 from datetime import datetime
 from ultralytics import YOLO
 
-# --- Monsoon Power Monitor imports ---
-import monsoon
-from monsoon import sampling
+# --- Monsoon Power Monitor imports (FIXED) ---
+import Monsoon
+from Monsoon import sampleEngine
 
 # ============================================================
 # 1. Load the REAL image ONCE (disk I/O excluded from timing)
 # ============================================================
-image_path = os.path.join(os.path.dirname(__file__), "test_image.jpg")
+image_path = "/path/to/your/test_image.jpg"  # <-- CHANGE THIS
 img_bgr = cv2.imread(image_path)
 if img_bgr is None:
     raise FileNotFoundError(f"Image not found at {image_path}")
@@ -27,19 +26,19 @@ model.to('cuda:0')
 input_size = 640
 
 # ============================================================
-# 3. Initialize Monsoon High Voltage Power Monitor
+# 3. Initialize Monsoon High Voltage Power Monitor (FIXED)
 # ============================================================
 HVPMSerialNo = 12345  # Replace with your Monsoon's serial number
 
-HVMON = monsoon.Monsoon()
-HVMON.setup_usb(HVPMSerialNo, monsoon.USB_protocol())
+HVMON = Monsoon.Monsoon()
+HVMON.setup_usb(HVPMSerialNo, Monsoon.USB_protocol())
 HVMON.fillStatusPacket()
 
 # Set voltage to match your Orin's supply (e.g., 12V for barrel jack, 5V for USB-C)
 HVMON.setVout(12.0)
 
 # Create a sample engine to collect readings at 5000 Hz
-HVengine = sampling.SampleEngine(HVMON)
+HVengine = sampleEngine.SampleEngine(HVMON)
 
 # Optional: Save ALL raw Monsoon samples to a separate CSV (5000 Hz data)
 # HVengine.enableCSVOutput("monsoon_full_profile.csv")
@@ -55,7 +54,7 @@ TOTAL_ITERATIONS = 10000
 FINAL_AVG_ITERATIONS = 9000
 
 # ============================================================
-# 5. Storage for results (renamed for clarity)
+# 5. Storage for results
 # ============================================================
 preprocess_latencies = []      # Preprocessing latency (ms)
 yolo_latencies = []            # YOLO inference latency (ms)
@@ -131,7 +130,7 @@ HVengine.stopSampling()
 HVMON.setVout(0)
 
 # ============================================================
-# 9. Calculate statistics (renamed variables)
+# 9. Calculate statistics
 # ============================================================
 avg_preprocess_lat = np.mean(preprocess_latencies)
 avg_yolo_lat = np.mean(yolo_latencies)
@@ -146,11 +145,10 @@ std_yolo_pwr = np.std(yolo_power_readings)
 total_avg_lat = avg_preprocess_lat + avg_yolo_lat
 
 # ============================================================
-# 10. Save results to CSV (updated headers)
+# 10. Save results to CSV (unchanged)
 # ============================================================
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# --- 10a. Save per-iteration raw data ---
 raw_filename = f"profile_raw_{timestamp}.csv"
 with open(raw_filename, 'w', newline='') as f:
     writer = csv.writer(f)
@@ -168,7 +166,6 @@ with open(raw_filename, 'w', newline='') as f:
 
 print(f"✅ Raw iteration data saved to: {raw_filename}")
 
-# --- 10b. Save summary statistics (updated metric names) ---
 summary_filename = f"profile_summary_{timestamp}.csv"
 with open(summary_filename, 'w', newline='') as f:
     writer = csv.writer(f)
@@ -180,28 +177,25 @@ with open(summary_filename, 'w', newline='') as f:
     writer.writerow(["recorded_iterations", FINAL_AVG_ITERATIONS])
     writer.writerow(["warmup_iterations", WARMUP_ITERATIONS])
     writer.writerow(["input_size", input_size])
-    writer.writerow([])  # blank row
-    # Preprocessing metrics
+    writer.writerow([])
     writer.writerow(["preprocess_avg_latency_ms", avg_preprocess_lat])
     writer.writerow(["preprocess_std_latency_ms", std_preprocess_lat])
     writer.writerow(["preprocess_avg_power_w", avg_preprocess_pwr])
     writer.writerow(["preprocess_std_power_w", std_preprocess_pwr])
     writer.writerow(["preprocess_energy_joules", avg_preprocess_pwr * (avg_preprocess_lat / 1000.0)])
-    writer.writerow([])  # blank row
-    # YOLO inference metrics
+    writer.writerow([])
     writer.writerow(["yolo_avg_latency_ms", avg_yolo_lat])
     writer.writerow(["yolo_std_latency_ms", std_yolo_lat])
     writer.writerow(["yolo_avg_power_w", avg_yolo_pwr])
     writer.writerow(["yolo_std_power_w", std_yolo_pwr])
     writer.writerow(["yolo_energy_joules", avg_yolo_pwr * (avg_yolo_lat / 1000.0)])
-    writer.writerow([])  # blank row
-    # Total pipeline
+    writer.writerow([])
     writer.writerow(["total_avg_latency_ms", total_avg_lat])
 
 print(f"✅ Summary statistics saved to: {summary_filename}")
 
 # ============================================================
-# 11. Print results to console (updated labels)
+# 11. Print results to console
 # ============================================================
 print(f"\n{'='*60}")
 print(f"PROFILING RESULTS (based on the last {FINAL_AVG_ITERATIONS} iterations)")

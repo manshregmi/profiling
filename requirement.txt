@@ -1,0 +1,15 @@
+# Core scientific computing
+numpy>=1.24.0
+
+# Image processing (CPU preprocessing)
+opencv-python>=4.8.0
+
+# YOLO v13 (Ultralytics)
+ultralytics>=8.0.0
+
+# Monsoon High Voltage Power Monitor SDK
+Monsoon>=0.8.0
+
+# USB communication backend for Monsoon
+pyusb>=1.2.0
+libusb1>=3.0.0

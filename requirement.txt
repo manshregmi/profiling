@@ -1,7 +1,15 @@
+# ================================================
+# REQUIREMENTS FOR YOLOv13 + MONSOON PROFILING
+# ================================================
+# NOTE: PyTorch and torchvision are EXCLUDED from this file
+# because they are architecture-specific and must be installed
+# separately on the NVIDIA Orin NX (ARM64) using the setup.sh script.
+# ================================================
+
 # Core scientific computing
 numpy>=1.24.0
 
-# Image processing (CPU preprocessing)
+# Image processing (CPU preprocessing: resize, grayscale, normalization)
 opencv-python>=4.8.0
 
 # YOLO v13 (Ultralytics)

@@ -1,3 +1,1 @@
-pip uninstall torch torchvision torchaudio -y
-pip install --pre torch torchvision \
---index-url https://pypi.jetson-ai-lab.dev/jp6/cu126
+nslookup pypi.jetson-ai-lab.dev

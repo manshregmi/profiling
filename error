@@ -1,0 +1,9 @@
+myenv) edge@edge-desktop:~/profiling$ pip install --pre torch torchvision \
+--index-url https://pypi.jetson-ai-lab.dev/jp6/cu126
+Looking in indexes: https://pypi.jetson-ai-lab.dev/jp6/cu126
+WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NameResolutionError("HTTPSConnection(host='pypi.jetson-ai-lab.dev', port=443): Failed to resolve 'pypi.jetson-ai-lab.dev' ([Errno -2] Name or service not known)")': /jp6/cu126/torch/
+WARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NameResolutionError("HTTPSConnection(host='pypi.jetson-ai-lab.dev', port=443): Failed to resolve 'pypi.jetson-ai-lab.dev' ([Errno -2] Name or service not known)")': /jp6/cu126/torch/
+WARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NameResolutionError("HTTPSConnection(host='pypi.jetson-ai-lab.dev', port=443): Failed to resolve 'pypi.jetson-ai-lab.dev' ([Errno -2] Name or service not known)")': /jp6/cu126/torch/
+WARNING: Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NameResolutionError("HTTPSConnection(host='pypi.jetson-ai-lab.dev', port=443): Failed to resolve 'pypi.jetson-ai-lab.dev' ([Errno -2] Name or service not known)")': /jp6/cu126/torch/
+WARNING: Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NameResolutionError("HTTPSConnection(host='pypi.jetson-ai-lab.dev', port=443): Failed to resolve 'pypi.jetson-ai-lab.dev' ([Errno -2] Name or service not known)")': /jp6/cu126/torch/
+ERROR: Could not find a version that satisfies the requirement torch (from versions: none)

@@ -1,238 +1,143 @@
 #!/bin/bash
+# setup_environment.sh - Full environment setup for YOLOv13 pipeline on Jetson Nano
+# This script installs Python 3.9, creates a virtual environment, and installs all dependencies.
 
-# ============================================================
-# YOLOv13 + Monsoon Setup for NVIDIA Jetson Orin NX
-# JetPack 6.2.2
-# ============================================================
+set -e  # Exit on error
 
-set -e
-
-
-echo "=============================================="
-echo " YOLOv13 + Monsoon Setup"
-echo " Jetson Orin NX / JetPack 6.2.2"
-echo "=============================================="
-
-
-# ------------------------------------------------------------
+# ----------------------------
 # 1. System packages
-# ------------------------------------------------------------
+# ----------------------------
+echo "==== Updating system packages ===="
+sudo apt update
+sudo apt upgrade -y
 
-echo "[1/8] Installing system dependencies..."
-
-sudo apt-get update
-
-sudo apt-get install -y \
-    python3-pip \
-    python3-dev \
+echo "==== Installing essential build tools and libraries ===="
+sudo apt install -y \
     build-essential \
+    cmake \
     git \
     wget \
     curl \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libusb-1.0-0-dev \
-    udev
+    libopenblas-dev \
+    libatlas-base-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libgtk2.0-dev \
+    libcanberra-gtk-module \
+    libcanberra-gtk3-module \
+    python3-dev \
+    python3-pip \
+    python3-venv
 
-
-
-# ------------------------------------------------------------
-# 2. Upgrade pip
-# ------------------------------------------------------------
-
-echo "[2/8] Updating pip..."
-
-python3 -m pip install --upgrade pip
-
-
-
-# ------------------------------------------------------------
-# 3. cuSPARSELt
-# ------------------------------------------------------------
-
-echo "[3/8] Installing cuSPARSELt..."
-
-wget -q \
-https://developer.download.nvidia.com/compute/cusparselt/0.8.1/local_installers/cusparselt-local-tegra-repo-ubuntu2204-0.8.1_0.8.1-1_arm64.deb \
--O /tmp/cusparselt.deb
-
-
-if [ -f /tmp/cusparselt.deb ]; then
-
-    sudo dpkg -i /tmp/cusparselt.deb || true
-
-    sudo cp \
-    /var/cusparselt-local-tegra-repo-ubuntu2204-0.8.1/cusparselt-*-keyring.gpg \
-    /usr/share/keyrings/ || true
-
-
-    sudo apt-get update
-
-    sudo apt-get install -y \
-        cusparselt-cuda-12 || true
-
-
-    rm /tmp/cusparselt.deb
-
-    echo "cuSPARSELt installed"
-
+# ----------------------------
+# 2. Install Python 3.9 (if not already available)
+# ----------------------------
+echo "==== Checking Python 3.9 ===="
+if command -v python3.9 &> /dev/null; then
+    echo "Python 3.9 is already installed."
 else
-
-    echo "cuSPARSELt download failed"
-
+    echo "Python 3.9 not found. Installing from deadsnakes PPA..."
+    sudo apt install -y software-properties-common
+    sudo add-apt-repository -y ppa:deadsnakes/ppa
+    sudo apt update
+    sudo apt install -y python3.9 python3.9-venv python3.9-dev
 fi
 
+# ----------------------------
+# 3. Create virtual environment
+# ----------------------------
+VENV_NAME="yolov13_env"
+echo "==== Creating virtual environment: $VENV_NAME (Python 3.9) ===="
+python3.9 -m venv "$VENV_NAME"
+source "$VENV_NAME/bin/activate"
 
+# ----------------------------
+# 4. Upgrade pip and install core packages
+# ----------------------------
+echo "==== Installing Python packages inside virtual environment ===="
+pip install --upgrade pip
 
+# Install PyTorch for Jetson (ARM64, CUDA 10.2 or 11.4 depending on JetPack)
+# For JetPack 4.6 (CUDA 10.2) use the official NVIDIA wheel.
+# For JetPack 5.0+ (CUDA 11.4) adjust accordingly.
+# We'll detect the L4T version to choose the correct wheel.
 
-# ------------------------------------------------------------
-# 4. PyTorch CUDA
-# ------------------------------------------------------------
+L4T_VERSION=$(head -n1 /etc/nv_tegra_release | grep -o "REVISION: [0-9.]*" | cut -d' ' -f2)
+echo "Detected L4T version: $L4T_VERSION"
 
-echo "[4/8] Installing Jetson PyTorch..."
+if [[ "$L4T_VERSION" == "32."* ]]; then
+    # JetPack 4.x (CUDA 10.2)
+    echo "Installing PyTorch for JetPack 4.x (CUDA 10.2)"
+    pip install torch==1.10.0 torchvision==0.11.1 -f https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl
+elif [[ "$L4T_VERSION" == "35."* ]]; then
+    # JetPack 5.0+ (CUDA 11.4)
+    echo "Installing PyTorch for JetPack 5.x (CUDA 11.4)"
+    pip install torch==1.12.0 torchvision==0.13.0 -f https://nvidia.box.com/shared/static/p57jwntv436lfrd78inwl7iml6p13fzh.whl
+else
+    echo "Unknown L4T version, defaulting to JetPack 4.x PyTorch 1.10.0"
+    pip install torch==1.10.0 torchvision==0.11.1 -f https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl
+fi
 
-pip3 install \
---pre torch torchvision \
---index-url https://pypi.jetson-ai-lab.dev/jp6/cu126
+# Install other common packages
+pip install opencv-python pillow numpy pandas tqdm
 
-
-
-# ------------------------------------------------------------
-# 5. Clone YOLOv13 repo
-# ------------------------------------------------------------
-
-
-echo "[5/8] Installing YOLOv13..."
-
-if [ ! -d "yolov13" ]; then
-
+# ----------------------------
+# 5. Clone and install YOLOv13
+# ----------------------------
+echo "==== Cloning YOLOv13 repository ===="
+if [ -d "yolov13" ]; then
+    echo "yolov13 directory already exists, pulling latest..."
+    cd yolov13 && git pull && cd ..
+else
     git clone https://github.com/iMoonLab/yolov13.git
-
 fi
-
 
 cd yolov13
 
-
-
-# IMPORTANT:
-# install repo version, NOT pip ultralytics
-
-pip3 install \
-numpy \
-opencv-python \
-pyusb \
-libusb1 \
-Monsoon
-
-
-pip3 install -e .
-
-
-
-cd ..
-
-
-
-# ------------------------------------------------------------
-# 6. Monsoon USB permissions
-# ------------------------------------------------------------
-
-
-echo "[6/8] Setting Monsoon permissions..."
-
-
-sudo bash -c \
-'echo "SUBSYSTEM==\"usb\", ATTR{idVendor}==\"0b1e\", MODE=\"0666\", GROUP=\"plugdev\"" > /etc/udev/rules.d/99-monsoon.rules'
-
-
-sudo udevadm control --reload-rules
-
-sudo udevadm trigger
-
-
-sudo usermod -a -G plugdev $USER
-
-
-
-
-# ------------------------------------------------------------
-# 7. Download YOLOv13 weights
-# ------------------------------------------------------------
-
-
-echo "[7/8] Downloading YOLOv13n weights..."
-
-
-mkdir -p weights
-
-
-cd weights
-
-
-if [ ! -f yolov13n.pt ]; then
-
-
-wget \
-https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13n.pt \
--O yolov13n.pt
-
-
+echo "==== Installing YOLOv13 dependencies ===="
+# Remove flash-attention from requirements if on ARM64 (Jetson)
+if grep -q "flash_attn" requirements.txt; then
+    echo "Detected flash-attention in requirements. Removing it for ARM64 compatibility."
+    grep -v "flash_attn" requirements.txt > requirements_arm64.txt
+    pip install -r requirements_arm64.txt
 else
-
-echo "weights already exist"
-
+    pip install -r requirements.txt
 fi
 
+# Install the YOLOv13 package itself
+pip install -e .
+
+# ----------------------------
+# 6. Download model weights (Nano variant)
+# ----------------------------
+echo "==== Downloading YOLOv13-Nano weights ===="
+if [ ! -f "yolov13n.pt" ]; then
+    wget https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13n.pt
+else
+    echo "yolov13n.pt already exists."
+fi
+
+# Optionally download other variants (S, L, X) if needed
+# wget https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13s.pt
+# wget https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13l.pt
+# wget https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13x.pt
 
 cd ..
 
-
-
-# ------------------------------------------------------------
-# 8. Verify
-# ------------------------------------------------------------
-
-
-echo "[8/8] Testing installation..."
-
-python3 <<EOF
-
-import torch
-
-print("--------------------------------")
-print("PyTorch:", torch.__version__)
-print("CUDA:", torch.cuda.is_available())
-
-if torch.cuda.is_available():
-    print("GPU:", torch.cuda.get_device_name(0))
-
-
-from ultralytics import YOLO
-
-
-model = YOLO(
-    "weights/yolov13n.pt"
-)
-
-
-print("YOLOv13 loaded successfully")
-
-EOF
-
-
-
+# ----------------------------
+# 7. Final instructions
+# ----------------------------
+echo "==== Setup complete! ===="
 echo ""
-echo "=============================================="
-echo " SETUP COMPLETE"
-echo "=============================================="
-
+echo "To activate the virtual environment, run:"
+echo "  source $VENV_NAME/bin/activate"
 echo ""
-echo "Run:"
+echo "To test YOLOv13, run:"
+echo "  cd yolov13"
+echo "  python -c \"from ultralytics import YOLO; model = YOLO('yolov13n.pt'); results = model('path/to/your/image.jpg'); results[0].show()\""
 echo ""
-echo "python3 profile_yolo.py"
-echo ""
-
-echo "If USB permissions fail, reboot:"
-echo ""
-echo "sudo reboot"
+echo "Enjoy!"

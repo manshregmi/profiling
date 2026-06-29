@@ -1,176 +1,208 @@
-import torch
-import numpy as np
 import time
 import cv2
-import csv
-import os
-import sys
-from datetime import datetime
+import torch
+import numpy as np
 from ultralytics import YOLO
+from ultralytics.utils.ops import non_max_suppression
+from torchvision import transforms, models
+from PIL import Image
 
-# ============================================================
-# 0. MONSOON – correct imports
-# ============================================================
-import Monsoon
-from Monsoon import sampleEngine
+# ------------------------------
+# 1. Load models
+# ------------------------------
+# Load YOLOv13 (using Ultralytics wrapper, then extract raw model)
+detection_model = YOLO('yolov13n.pt').model.to('cuda').eval()
 
-# ============================================================
-# 1. Model path helper
-# ============================================================
-def get_model_path():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(script_dir, "weights", "yolov13n.pt")
-    if not os.path.isfile(model_path):
-        print(f"❌ Model not found: {model_path}")
-        print("Please run setup.sh to download it.")
-        sys.exit(1)
-    return model_path
+# Load three classifiers (choose lightweight ones for Jetson Nano)
+classifier_1 = models.resnet18(pretrained=True).to('cuda').eval()
+classifier_2 = models.mobilenet_v2(pretrained=True).to('cuda').eval()
+classifier_3 = models.squeezenet1_0(pretrained=True).to('cuda').eval()
 
-# ============================================================
-# 2. Load image
-# ============================================================
-script_dir = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(script_dir, "test.jpg")
-img_bgr = cv2.imread(image_path)
-if img_bgr is None:
-    raise FileNotFoundError(f"Image not found: {image_path}")
+# For demonstration, we'll use a list of class names (ImageNet)
+CLASS_NAMES = [f"Class_{i}" for i in range(1000)]
 
-# ============================================================
-# 3. YOLOv13 load
-# ============================================================
-model_path = get_model_path()
-device = 0 if torch.cuda.is_available() else "cpu"
-print("CUDA available:", torch.cuda.is_available())
-model = YOLO(model_path)
-input_size = 640
+# ------------------------------
+# 2. Pre‑processing functions (CPU)
+# ------------------------------
+def detection_preprocess_cpu(image, target_size=640):
+    """
+    Pre‑process for detection: resize, Gaussian blur, grayscale,
+    convert back to 3 channels, normalize to [0,1].
+    Returns a torch.Tensor on CPU.
+    """
+    resized = cv2.resize(image, (target_size, target_size))
+    blurred = cv2.GaussianBlur(resized, (5, 5), 0)
+    gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+    gray_3ch = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    img = gray_3ch.astype(np.float32) / 255.0
+    tensor = torch.from_numpy(np.transpose(img, (2, 0, 1))).float().unsqueeze(0)
+    return tensor
 
-# ============================================================
-# 4. MONSOON INIT (corrected)
-# ============================================================
-HVPMSerialNo = 33521  
+def classification_preprocess_cpu(cropped_image, target_size=224):
+    """
+    Pre‑process for classification: resize, blur, grayscale, 
+    convert to 3‑channel, ToTensor + ImageNet normalization.
+    Returns a torch.Tensor on CPU.
+    """
+    resized = cv2.resize(cropped_image, (target_size, target_size))
+    blurred = cv2.GaussianBlur(resized, (5, 5), 0)
+    gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+    gray_3ch = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+    tensor = transform(Image.fromarray(gray_3ch)).unsqueeze(0)
+    return tensor
 
-HVMON = Monsoon.Monsoon()
-HVMON.setup_usb(HVPMSerialNo, Monsoon.USB_protocol())
-HVMON.fillStatusPacket()
-HVMON.setVout(12.0)
+# ------------------------------
+# 3. Post‑processing functions (CPU)
+# ------------------------------
+def detection_postprocess_cpu(original_image, detections):
+    """
+    Crop objects from the original image using bounding boxes.
+    detections: list of [x1, y1, x2, y2, conf, class]
+    Returns a list of cropped images (numpy arrays).
+    """
+    crops = []
+    h, w = original_image.shape[:2]
+    for det in detections:
+        x1, y1, x2, y2 = map(int, det[:4])
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 > x1 and y2 > y1:
+            crops.append(original_image[y1:y2, x1:x2])
+    return crops
 
-HVengine = sampleEngine.SampleEngine(HVMON)
-HVengine.startSampling()
+def classification_postprocess_cpu(logits):
+    """Convert logits to a class name (softmax + argmax)."""
+    probs = torch.softmax(logits, dim=1)
+    _, pred_idx = torch.max(probs, 1)
+    return CLASS_NAMES[pred_idx.item()]
 
-# ============================================================
-# 5. Parameters
-# ============================================================
-WARMUP_ITERATIONS = 200
-TOTAL_ITERATIONS = 10000
-FINAL_AVG_ITERATIONS = 9000
+# ------------------------------
+# 4. Main pipeline with hybrid timing
+# ------------------------------
+def run_hybrid_timed_pipeline(image_path, num_warmup=10):
+    # Load input image
+    original = cv2.imread(image_path)
+    if original is None:
+        raise FileNotFoundError(f"Image not found: {image_path}")
 
-preprocess_latencies = []
-yolo_latencies = []
-preprocess_power = []
-yolo_power = []
-
-# ============================================================
-# 6. Warmup
-# ============================================================
-print(f"Warmup ({WARMUP_ITERATIONS})...")
-for _ in range(WARMUP_ITERATIONS):
-    _ = model.predict(img_bgr, imgsz=input_size, device=device, verbose=False)
-
-if torch.cuda.is_available():
+    # --- Warm‑up GPU (to initialise kernels) ---
+    print("Warming up GPU...")
+    dummy_input = torch.randn(1, 3, 640, 640).to('cuda')
+    for _ in range(num_warmup):
+        with torch.no_grad():
+            _ = detection_model(dummy_input)
     torch.cuda.synchronize()
 
-# ============================================================
-# 7. MAIN PROFILING LOOP
-# ============================================================
-print(f"Profiling ({TOTAL_ITERATIONS})...")
+    # ==============================================
+    # 1. Detection Stage
+    # ==============================================
 
-for i in range(TOTAL_ITERATIONS):
-    # ---------- Preprocessing ----------
-    p_start = time.perf_counter()
-    resized = cv2.resize(img_bgr, (input_size, input_size))
-    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    p_end = time.perf_counter()
-    p_latency = (p_end - p_start) * 1000.0
-    p_power = HVengine.getLastSample().power
+    # ---- Pre‑processing (CPU) ----
+    t_start_cpu = time.perf_counter()
+    det_input_cpu = detection_preprocess_cpu(original)
+    t_end_cpu = time.perf_counter()
+    det_pre_time_ms = (t_end_cpu - t_start_cpu) * 1000.0
 
-    # ---------- YOLO inference ----------
-    if torch.cuda.is_available():
+    # ---- Move data to GPU ----
+    det_input_gpu = det_input_cpu.to('cuda')
+
+    # ---- Inference (GPU) using CUDA events ----
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+
+    start_event.record()
+    with torch.no_grad():
+        # Raw model output (may need NMS)
+        outputs = detection_model(det_input_gpu)
+        # Apply NMS (Ultralytics' non_max_suppression)
+        dets = non_max_suppression(outputs, conf_thres=0.25, iou_thres=0.45)
+    end_event.record()
+    torch.cuda.synchronize()          # Wait for GPU to finish
+    det_inf_time_ms = start_event.elapsed_time(end_event)
+
+    # ---- Post‑processing (CPU) ----
+    t_start_cpu = time.perf_counter()
+    # Convert detections from GPU tensor to CPU list
+    if dets[0] is not None:
+        detections = dets[0].cpu().numpy().tolist()
+    else:
+        detections = []
+    crops = detection_postprocess_cpu(original, detections)
+    t_end_cpu = time.perf_counter()
+    det_post_time_ms = (t_end_cpu - t_start_cpu) * 1000.0
+
+    # Print detection timings
+    print("\n--- Detection Stage ---")
+    print(f"Pre‑process (CPU)   : {det_pre_time_ms:.2f} ms")
+    print(f"Inference (GPU)     : {det_inf_time_ms:.2f} ms")
+    print(f"Post‑process (CPU)  : {det_post_time_ms:.2f} ms")
+    print(f"Number of objects   : {len(crops)}")
+
+    # ==============================================
+    # 2. Classification Stage (per crop)
+    # ==============================================
+    total_class_pre_ms = 0.0
+    total_class_inf_ms = 0.0
+    total_class_post_ms = 0.0
+    final_results = []
+
+    for idx, crop in enumerate(crops):
+        # ---- Pre‑process (CPU) ----
+        t_start_cpu = time.perf_counter()
+        cls_input_cpu = classification_preprocess_cpu(crop)
+        t_end_cpu = time.perf_counter()
+        total_class_pre_ms += (t_end_cpu - t_start_cpu) * 1000.0
+
+        # ---- Move to GPU ----
+        cls_input_gpu = cls_input_cpu.to('cuda')
+
+        # ---- Inference on three classifiers (GPU) ----
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
+
         start_event.record()
-
-    _ = model.predict(rgb, imgsz=input_size, device=device, verbose=False)
-
-    if torch.cuda.is_available():
+        with torch.no_grad():
+            out1 = classifier_1(cls_input_gpu)
+            out2 = classifier_2(cls_input_gpu)
+            out3 = classifier_3(cls_input_gpu)
         end_event.record()
         torch.cuda.synchronize()
-        y_latency = start_event.elapsed_time(end_event)
-    else:
-        y_latency = 0
+        total_class_inf_ms += start_event.elapsed_time(end_event)
 
-    y_power = HVengine.getLastSample().power
+        # ---- Post‑process (CPU) ----
+        t_start_cpu = time.perf_counter()
+        label1 = classification_postprocess_cpu(out1)
+        label2 = classification_postprocess_cpu(out2)
+        label3 = classification_postprocess_cpu(out3)
+        combined = f"{label1} | {label2} | {label3}"
+        t_end_cpu = time.perf_counter()
+        total_class_post_ms += (t_end_cpu - t_start_cpu) * 1000.0
 
-    # ---------- Store only last 9000 ----------
-    if i >= TOTAL_ITERATIONS - FINAL_AVG_ITERATIONS:
-        preprocess_latencies.append(p_latency)
-        yolo_latencies.append(y_latency)
-        preprocess_power.append(p_power)
-        yolo_power.append(y_power)
+        final_results.append(combined)
 
-    if (i + 1) % 1000 == 0:
-        print(f"Completed {i+1}/{TOTAL_ITERATIONS}")
+    # Print classification timings (totals for all crops)
+    print("\n--- Classification Stage (total for all crops) ---")
+    print(f"Pre‑process (CPU)   : {total_class_pre_ms:.2f} ms")
+    print(f"Inference (GPU)     : {total_class_inf_ms:.2f} ms")
+    print(f"Post‑process (CPU)  : {total_class_post_ms:.2f} ms")
 
-# ============================================================
-# 8. Cleanup
-# ============================================================
-HVengine.stopSampling()
-HVMON.setVout(0)
+    # ---- Overall total ----
+    total_time_ms = (det_pre_time_ms + det_inf_time_ms + det_post_time_ms +
+                     total_class_pre_ms + total_class_inf_ms + total_class_post_ms)
+    print(f"\n=== TOTAL PIPELINE LATENCY : {total_time_ms:.2f} ms ===")
 
-# ============================================================
-# 9. Stats
-# ============================================================
-avg_pp = np.mean(preprocess_latencies)
-avg_yolo = np.mean(yolo_latencies)
-avg_pp_power = np.mean(preprocess_power)
-avg_yolo_power = np.mean(yolo_power)
-std_pp = np.std(preprocess_latencies)
-std_yolo = np.std(yolo_latencies)
+    return final_results
 
-# ============================================================
-# 10. CSV OUTPUT
-# ============================================================
-ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-raw_csv = f"profile_raw_{ts}.csv"
-with open(raw_csv, "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["iteration", "preprocess_latency_ms", "yolo_latency_ms",
-                     "preprocess_power_w", "yolo_power_w"])
-    for i, row in enumerate(zip(preprocess_latencies, yolo_latencies,
-                                preprocess_power, yolo_power)):
-        writer.writerow([i + 1, *row])
-print(f"Saved: {raw_csv}")
-
-summary_csv = f"profile_summary_{ts}.csv"
-with open(summary_csv, "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["metric", "value"])
-    writer.writerow(["preprocess_avg_ms", avg_pp])
-    writer.writerow(["preprocess_std_ms", std_pp])
-    writer.writerow(["yolo_avg_ms", avg_yolo])
-    writer.writerow(["yolo_std_ms", std_yolo])
-    writer.writerow(["preprocess_power_w", avg_pp_power])
-    writer.writerow(["yolo_power_w", avg_yolo_power])
-    writer.writerow(["total_latency_ms", avg_pp + avg_yolo])
-print(f"Saved: {summary_csv}")
-
-# ============================================================
-# FINAL OUTPUT
-# ============================================================
-print("\n==============================")
-print("RESULTS")
-print("==============================")
-print(f"Preprocess: {avg_pp:.3f} ms | {avg_pp_power:.3f} W")
-print(f"YOLO      : {avg_yolo:.3f} ms | {avg_yolo_power:.3f} W")
-print(f"TOTAL     : {avg_pp + avg_yolo:.3f} ms")
-print("==============================")
+# ------------------------------
+# 5. Run the pipeline
+# ------------------------------
+if __name__ == "__main__":
+    results = run_hybrid_timed_pipeline("test.jpg")
+    print("\nFinal cascaded labels per object:")
+    for i, label in enumerate(results):
+        print(f"Object {i+1}: {label}")

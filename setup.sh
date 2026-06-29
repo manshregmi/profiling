@@ -1,6 +1,6 @@
 #!/bin/bash
-# setup_environment.sh - Full environment setup for YOLOv13 pipeline on Jetson Nano
-# This script installs Python 3.9, creates a virtual environment, and installs all dependencies.
+# setup_environment.sh - Complete environment setup for YOLOv13 pipeline on Jetson Nano
+# Includes all dependencies for the pipeline, power monitoring, and CSV logging.
 
 set -e  # Exit on error
 
@@ -11,7 +11,7 @@ echo "==== Updating system packages ===="
 sudo apt update
 sudo apt upgrade -y
 
-echo "==== Installing essential build tools and libraries ===="
+echo "==== Installing essential build tools, libraries, and USB support ===="
 sudo apt install -y \
     build-essential \
     cmake \
@@ -29,6 +29,7 @@ sudo apt install -y \
     libgtk2.0-dev \
     libcanberra-gtk-module \
     libcanberra-gtk3-module \
+    libusb-1.0-0-dev \
     python3-dev \
     python3-pip \
     python3-venv
@@ -62,10 +63,6 @@ echo "==== Installing Python packages inside virtual environment ===="
 pip install --upgrade pip
 
 # Install PyTorch for Jetson (ARM64, CUDA 10.2 or 11.4 depending on JetPack)
-# For JetPack 4.6 (CUDA 10.2) use the official NVIDIA wheel.
-# For JetPack 5.0+ (CUDA 11.4) adjust accordingly.
-# We'll detect the L4T version to choose the correct wheel.
-
 L4T_VERSION=$(head -n1 /etc/nv_tegra_release | grep -o "REVISION: [0-9.]*" | cut -d' ' -f2)
 echo "Detected L4T version: $L4T_VERSION"
 
@@ -82,8 +79,16 @@ else
     pip install torch==1.10.0 torchvision==0.11.1 -f https://nvidia.box.com/shared/static/fjtbno0vpo676a25cgvuqc1wty0fkkg6.whl
 fi
 
-# Install other common packages
+# Install core data science and vision packages
+echo "==== Installing vision, data, and GPIO packages ===="
 pip install opencv-python pillow numpy pandas tqdm
+
+# Install Jetson GPIO (for hardware triggering)
+pip install Jetson.GPIO
+
+# Install Monsoon power monitor Python library (requires libusb)
+echo "==== Installing Monsoon power monitor library ===="
+pip install monsoon
 
 # ----------------------------
 # 5. Clone and install YOLOv13
@@ -129,15 +134,37 @@ fi
 cd ..
 
 # ----------------------------
-# 7. Final instructions
+# 7. Verify installation
 # ----------------------------
+echo "==== Verifying installation ===="
+python -c "import torch; print(f'PyTorch: {torch.__version__}')"
+python -c "import torchvision; print(f'TorchVision: {torchvision.__version__}')"
+python -c "import cv2; print(f'OpenCV: {cv2.__version__}')"
+python -c "import Jetson.GPIO as GPIO; print('Jetson.GPIO: OK')"
+python -c "import monsoon; print('Monsoon: OK')"
+python -c "from ultralytics import YOLO; print('Ultralytics/YOLOv13: OK')"
+
+# ----------------------------
+# 8. Final instructions
+# ----------------------------
+echo ""
 echo "==== Setup complete! ===="
+echo ""
+echo "✅ All dependencies installed:"
+echo "   - PyTorch + torchvision (JetPack-specific)"
+echo "   - OpenCV, Pillow, NumPy, Pandas"
+echo "   - Jetson.GPIO (hardware triggers)"
+echo "   - Monsoon (power monitor API)"
+echo "   - YOLOv13 (with Nano weights downloaded)"
 echo ""
 echo "To activate the virtual environment, run:"
 echo "  source $VENV_NAME/bin/activate"
 echo ""
-echo "To test YOLOv13, run:"
-echo "  cd yolov13"
-echo "  python -c \"from ultralytics import YOLO; model = YOLO('yolov13n.pt'); results = model('path/to/your/image.jpg'); results[0].show()\""
+echo "To profile your pipeline and generate CSV logs, run:"
+echo "  python pipeline_profiler.py --image test.jpg"
+echo ""
+echo "The script will create:"
+echo "  - latency_log.csv  (timestamps and durations for each stage)"
+echo "  - monsoon_data.csv (power samples, if Monsoon is connected)"
 echo ""
 echo "Enjoy!"

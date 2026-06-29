@@ -1,8 +1,13 @@
 #!/bin/bash
-# setup_environment.sh - Complete environment setup for YOLOv13 pipeline on Jetson Nano
-# Includes all dependencies for the pipeline, power monitoring, and CSV logging.
+# setup.sh - Complete environment setup for YOLOv13 pipeline on Jetson Nano
 
 set -e  # Exit on error
+
+# ----------------------------
+# 0. Fix GPG key for deadsnakes PPA (if needed)
+# ----------------------------
+echo "==== Ensuring GPG key for deadsnakes PPA is available ===="
+sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys BA6932366A755776 || true
 
 # ----------------------------
 # 1. System packages
@@ -32,7 +37,8 @@ sudo apt install -y \
     libusb-1.0-0-dev \
     python3-dev \
     python3-pip \
-    python3-venv
+    python3-venv \
+    software-properties-common
 
 # ----------------------------
 # 2. Install Python 3.9 (if not already available)
@@ -42,7 +48,6 @@ if command -v python3.9 &> /dev/null; then
     echo "Python 3.9 is already installed."
 else
     echo "Python 3.9 not found. Installing from deadsnakes PPA..."
-    sudo apt install -y software-properties-common
     sudo add-apt-repository -y ppa:deadsnakes/ppa
     sudo apt update
     sudo apt install -y python3.9 python3.9-venv python3.9-dev
@@ -150,21 +155,12 @@ python -c "from ultralytics import YOLO; print('Ultralytics/YOLOv13: OK')"
 echo ""
 echo "==== Setup complete! ===="
 echo ""
-echo "✅ All dependencies installed:"
-echo "   - PyTorch + torchvision (JetPack-specific)"
-echo "   - OpenCV, Pillow, NumPy, Pandas"
-echo "   - Jetson.GPIO (hardware triggers)"
-echo "   - Monsoon (power monitor API)"
-echo "   - YOLOv13 (with Nano weights downloaded)"
+echo "✅ All dependencies installed."
 echo ""
 echo "To activate the virtual environment, run:"
 echo "  source $VENV_NAME/bin/activate"
 echo ""
 echo "To profile your pipeline and generate CSV logs, run:"
 echo "  python pipeline_profiler.py --image test.jpg"
-echo ""
-echo "The script will create:"
-echo "  - latency_log.csv  (timestamps and durations for each stage)"
-echo "  - monsoon_data.csv (power samples, if Monsoon is connected)"
 echo ""
 echo "Enjoy!"

@@ -1,30 +1,24 @@
 #!/bin/bash
-# setup.sh - One‑shot environment setup for Jetson Nano (Ubuntu 18.04)
-# This script will:
-#   - Fix broken packages
-#   - Install Python 3.9 and minimal build tools
-#   - Create a virtual environment (Python 3.9)
-#   - Install all Python packages (PyTorch, OpenCV, YOLOv13, etc.)
-#   - Download YOLOv13 model weights
+# setup.sh - Complete environment setup for Jetson Nano (ARM64)
+# This script builds Python 3.9 from source, then sets up the pipeline.
 
-set -e  # Stop on error
+set -e  # Exit on error
 
 echo "==== Starting Jetson Nano environment setup ===="
 
 # ------------------------------------------------------------------
-# 1. Fix broken packages and remove problematic system packages
+# 1. Fix broken packages and remove problematic packages
 # ------------------------------------------------------------------
 echo "==== Fixing system packages ===="
 sudo apt --fix-broken install -y
 sudo dpkg --configure -a
 sudo apt install -f -y
 
-# Remove curl, libjpeg-dev, libtiff-dev – they cause conflicts and are not needed
-echo "Removing non‑essential packages that may cause conflicts..."
+# Remove non-essential problematic packages (they are not needed)
 sudo apt remove --purge -y curl libjpeg-dev libtiff-dev || true
 
 # ------------------------------------------------------------------
-# 2. Install minimal system dependencies
+# 2. Install essential system dependencies
 # ------------------------------------------------------------------
 echo "==== Installing essential system packages ===="
 sudo apt update
@@ -39,20 +33,47 @@ sudo apt install -y \
     software-properties-common \
     libopenblas-dev \
     libatlas-base-dev \
-    libusb-1.0-0-dev
+    libusb-1.0-0-dev \
+    libssl-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libffi-dev \
+    zlib1g-dev \
+    libncurses5-dev \
+    libgdbm-dev \
+    libnss3-dev \
+    liblzma-dev \
+    uuid-dev \
+    tk-dev
 
 # ------------------------------------------------------------------
-# 3. Install Python 3.9 (if not already present)
+# 3. Build Python 3.9 from source (since deadsnakes doesn't support arm64)
 # ------------------------------------------------------------------
-echo "==== Installing Python 3.9 ===="
-if ! command -v python3.9 &> /dev/null; then
-    echo "Python 3.9 not found. Adding deadsnakes PPA..."
-    sudo add-apt-repository -y ppa:deadsnakes/ppa
-    sudo apt update
-    sudo apt install -y python3.9 python3.9-venv python3.9-dev
+PYTHON_VERSION="3.9.18"
+PYTHON_SRC="/tmp/Python-${PYTHON_VERSION}"
+
+echo "==== Building Python ${PYTHON_VERSION} from source ===="
+if command -v python3.9 &> /dev/null; then
+    echo "Python 3.9 already installed, skipping build."
 else
-    echo "Python 3.9 already installed."
+    cd /tmp
+    wget "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz"
+    tar -xzf "Python-${PYTHON_VERSION}.tgz"
+    cd "Python-${PYTHON_VERSION}"
+    ./configure --enable-optimizations --enable-shared --prefix=/usr/local
+    make -j$(nproc)
+    sudo make altinstall
+    # Clean up
+    cd /tmp
+    rm -rf "Python-${PYTHON_VERSION}" "Python-${PYTHON_VERSION}.tgz"
+    # Update library cache
+    sudo ldconfig
+    echo "Python 3.9 installed successfully."
 fi
+
+# Verify
+python3.9 --version
 
 # ------------------------------------------------------------------
 # 4. Create virtual environment
@@ -105,7 +126,7 @@ fi
 
 cd yolov13
 
-# Remove flash-attention from requirements (ARM64 incompatible)
+# Remove flash-attention (ARM64 incompatible)
 if grep -q "flash_attn" requirements.txt; then
     echo "Removing flash-attention from requirements.txt for ARM64 compatibility."
     grep -v "flash_attn" requirements.txt > requirements_arm64.txt

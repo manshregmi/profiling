@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup.sh - Install PyTorch and all dependencies with direct URLs
+# setup.sh - Uses Qengineering's PyTorch wheels (working)
 
 set -e
 BASE_DIR="$(pwd)"
@@ -9,62 +9,35 @@ mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"
 PIP_OPTS="--no-cache-dir --cache-dir $PIP_CACHE_DIR"
 
 sudo apt update
-sudo apt install -y build-essential git wget libopenblas-dev libatlas-base-dev libusb-1.0-0-dev python3-dev python3-pip python3-venv
+sudo apt install -y build-essential git wget libopenblas-dev libatlas-base-dev \
+    libusb-1.0-0-dev python3-dev python3-pip python3-venv \
+    libopenblas-base libopenmpi-dev libomp-dev \
+    libjpeg-dev zlib1g-dev libpython3-dev libavcodec-dev libavformat-dev libswscale-dev
 
 rm -rf yolov13_env
 python3 -m venv yolov13_env --clear
 source yolov13_env/bin/activate
 
-# ------------------------------------------------------------------
-# PyTorch 1.9.0 – try direct pip install from URL, then wget
-# ------------------------------------------------------------------
-TORCH_URL="https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl"
-echo "Installing PyTorch 1.9.0 from $TORCH_URL..."
-if pip install $PIP_OPTS "$TORCH_URL"; then
-    echo "PyTorch installed via pip."
-else
-    echo "pip install failed, trying wget..."
-    if wget --no-check-certificate -q --show-progress -O torch.whl "$TORCH_URL"; then
-        pip install $PIP_OPTS torch.whl
-        rm torch.whl
-    else
-        echo "ERROR: Could not download torch wheel."
-        echo "Please manually download $TORCH_URL and place it in this folder, then run:"
-        echo "  pip install torch.whl"
-        exit 1
-    fi
-fi
+# Install PyTorch 1.9.0 from Qengineering
+echo "Installing PyTorch 1.9.0 from Qengineering..."
+pip install $PIP_OPTS https://github.com/Qengineering/PyTorch-Jetson-Nano/raw/main/torch-1.9.0-cp36-cp36m-linux_aarch64.whl
 
-# ------------------------------------------------------------------
-# torchvision 0.10.0
-# ------------------------------------------------------------------
-TV_URL="https://nvidia.box.com/shared/static/4h2ltvj6s8h9o9h8w7z5e7e8e8e8e8e8.whl"
-echo "Installing torchvision 0.10.0 from $TV_URL..."
-if pip install $PIP_OPTS "$TV_URL"; then
-    echo "torchvision installed via pip."
-else
-    echo "pip install failed, trying wget..."
-    if wget --no-check-certificate -q --show-progress -O torchvision.whl "$TV_URL"; then
-        pip install $PIP_OPTS torchvision.whl
-        rm torchvision.whl
-    else
-        echo "ERROR: Could not download torchvision wheel."
-        echo "Please manually download $TV_URL and place it in this folder, then run:"
-        echo "  pip install torchvision.whl"
-        exit 1
-    fi
+# Build torchvision 0.10.0 from source
+echo "Building torchvision 0.10.0 from source..."
+if [ ! -d "torchvision" ]; then
+    git clone --branch v0.10.0 https://github.com/pytorch/vision torchvision
 fi
+cd torchvision
+export BUILD_VERSION=0.10.0
+python3 setup.py install --user
+cd ..
 
-# ------------------------------------------------------------------
-# Other packages (all aarch64 wheels)
-# ------------------------------------------------------------------
+# Install other packages
 pip install $PIP_OPTS numpy==1.19.5 pillow==8.4.0 pandas tqdm
 pip install $PIP_OPTS opencv-python-headless==4.5.5.64
 pip install $PIP_OPTS Jetson.GPIO monsoon
 
-# ------------------------------------------------------------------
 # YOLOv13
-# ------------------------------------------------------------------
 if [ ! -d "yolov13" ]; then
     git clone https://github.com/iMoonLab/yolov13.git
 fi
@@ -80,6 +53,6 @@ if [ ! -f "yolov13n.pt" ]; then
 fi
 cd ..
 
-# Verification
+# Verify
 python -c "import torch, cv2, ultralytics; print('All good')"
 echo "Setup complete. Activate with: source yolov13_env/bin/activate"

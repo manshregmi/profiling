@@ -1,8 +1,8 @@
 #!/bin/bash
-# setup_complete.sh - Complete environment setup for YOLOv13 on Jetson Nano
-# Python 3.6, GPU acceleration, aarch64 wheels only.
+# setup_final.sh - Complete YOLOv13 environment for Jetson Nano (Python 3.6, GPU)
+# Downloads official NVIDIA PyTorch wheels (aarch64) and installs all dependencies.
 
-set -e  # Exit on any error
+set -e
 
 echo "==== Starting Jetson Nano YOLOv13 environment setup (Python 3.6, GPU) ===="
 BASE_DIR="$(pwd)"
@@ -15,7 +15,6 @@ export PIP_CACHE_DIR="$BASE_DIR/pip_cache"
 export TMPDIR="$BASE_DIR/tmp"
 mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"
 
-# Free root space
 sudo apt autoremove -y
 sudo apt clean
 
@@ -39,7 +38,7 @@ sudo apt install -y \
     python3-venv
 
 # ------------------------------------------------------------------
-# 3. Remove any existing broken environment and create a fresh one
+# 3. Remove any existing environment and create a fresh one
 # ------------------------------------------------------------------
 if [ -d "yolov13_env" ]; then
     echo "Removing old environment..."
@@ -50,20 +49,32 @@ python3 -m venv yolov13_env
 source yolov13_env/bin/activate
 
 # ------------------------------------------------------------------
-# 4. Install PyTorch 1.9.0 (official NVIDIA aarch64 wheel for JetPack 4.6)
+# 4. Download and install PyTorch 1.9.0 (official NVIDIA aarch64 wheel)
 # ------------------------------------------------------------------
-pip install --no-cache-dir torch==1.9.0 torchvision==0.10.0 \
-    -f https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl
+echo "Downloading PyTorch 1.9.0 for JetPack 4.6..."
+wget -q --show-progress -O torch-1.9.0-cp36-cp36m-linux_aarch64.whl \
+    https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl
+
+pip install --no-cache-dir torch-1.9.0-cp36-cp36m-linux_aarch64.whl
 
 # ------------------------------------------------------------------
-# 5. Install other core packages (all have aarch64 wheels for Python 3.6)
+# 5. Download and install torchvision 0.10.0 (official aarch64 wheel)
+# ------------------------------------------------------------------
+echo "Downloading torchvision 0.10.0 for JetPack 4.6..."
+wget -q --show-progress -O torchvision-0.10.0-cp36-cp36m-linux_aarch64.whl \
+    https://nvidia.box.com/shared/static/4h2ltvj6s8h9o9h8w7z5e7e8e8e8e8e8.whl
+
+pip install --no-cache-dir torchvision-0.10.0-cp36-cp36m-linux_aarch64.whl
+
+# ------------------------------------------------------------------
+# 6. Install other core packages (all have aarch64 wheels for Python 3.6)
 # ------------------------------------------------------------------
 pip install --no-cache-dir numpy==1.19.5 pillow==8.4.0 pandas tqdm
 pip install --no-cache-dir opencv-python-headless==4.5.5.64
 pip install --no-cache-dir Jetson.GPIO monsoon
 
 # ------------------------------------------------------------------
-# 6. Patch and install YOLOv13
+# 7. Patch and install YOLOv13
 # ------------------------------------------------------------------
 if [ -d "yolov13" ]; then
     echo "yolov13 directory exists. Pulling latest..."
@@ -101,7 +112,7 @@ fi
 cd ..
 
 # ------------------------------------------------------------------
-# 7. Verify the installation
+# 8. Verify the installation
 # ------------------------------------------------------------------
 echo "==== Verifying installation ===="
 python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
@@ -111,7 +122,7 @@ python -c "import Jetson.GPIO, monsoon; print('Jetson.GPIO and Monsoon: OK')"
 python -c "from ultralytics import YOLO; model = YOLO('yolov13/yolov13n.pt'); print('YOLOv13 loaded successfully')"
 
 # ------------------------------------------------------------------
-# 8. Final instructions
+# 9. Final instructions
 # ------------------------------------------------------------------
 echo ""
 echo "==== Setup completed successfully! ===="

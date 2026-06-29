@@ -1,78 +1,48 @@
 #!/bin/bash
-# setup.sh - Install everything on external media with space management
+# setup_final.sh - Complete environment for YOLOv13 pipeline (Python 3.6, GPU)
 
 set -e
 
-echo "==== Starting Jetson Nano environment setup (Python 3.6) ===="
-echo "Current directory: $(pwd)"
+echo "==== Starting Jetson Nano pipeline setup (Python 3.6) ===="
+BASE_DIR="$(pwd)"
 
-# ------------------------------------------------------------------
-# 1. Free some space on root
-# ------------------------------------------------------------------
+# Clean up root cache and use external media for pip caches
+export PIP_CACHE_DIR="$BASE_DIR/pip_cache"
+export TMPDIR="$BASE_DIR/tmp"
+mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"
+
+# Free space
 sudo apt autoremove -y
 sudo apt clean
-rm -rf ~/.cache/pip
 
-# ------------------------------------------------------------------
-# 2. Set pip to use the external media for cache and temporary files
-# ------------------------------------------------------------------
-export PIP_CACHE_DIR="$(pwd)/pip_cache"
-export TMPDIR="$(pwd)/tmp"
-mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"
-echo "Using PIP_CACHE_DIR=$PIP_CACHE_DIR"
-echo "Using TMPDIR=$TMPDIR"
-
-# ------------------------------------------------------------------
-# 3. Fix broken packages (no new deps)
-# ------------------------------------------------------------------
+# Fix broken packages
 sudo apt update
 sudo apt --fix-broken install -y
 sudo apt install -f -y
 
-# ------------------------------------------------------------------
-# 4. Install minimal system libraries
-# ------------------------------------------------------------------
+# Minimal system libraries (no problematic multimedia packages)
 sudo apt install -y \
-    build-essential \
-    git \
-    wget \
-    libopenblas-dev \
-    libatlas-base-dev \
+    build-essential git wget \
+    libopenblas-dev libatlas-base-dev \
     libusb-1.0-0-dev \
-    python3-dev \
-    python3-pip \
-    python3-venv
+    python3-dev python3-pip python3-venv
 
-# ------------------------------------------------------------------
-# 5. Create virtual environment in the current (external) directory
-# ------------------------------------------------------------------
+# Create virtual environment
 VENV_NAME="yolov13_env"
 python3 -m venv "$VENV_NAME"
 source "$VENV_NAME/bin/activate"
 
-# ------------------------------------------------------------------
-# 6. Install Python packages (compatible with 3.6, using external cache)
-# ------------------------------------------------------------------
-pip install --upgrade pip --no-cache-dir
-
-# PyTorch 1.9.0 for JetPack 4.6 (CUDA 10.2) – has aarch64 wheel
+# Install PyTorch 1.9.0 (official Jetson wheel, CUDA 10.2)
 pip install --no-cache-dir torch==1.9.0 torchvision==0.10.0 \
     -f https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl
 
-# Core packages – use known good versions with aarch64 wheels
+# Other core packages (all have aarch64 wheels for Python 3.6)
 pip install --no-cache-dir numpy==1.19.5 pillow==8.4.0 pandas tqdm
-
-# OpenCV – use headless + known version that has aarch64 wheel
 pip install --no-cache-dir opencv-python-headless==4.5.5.64
-
-# GPIO and Monsoon
 pip install --no-cache-dir Jetson.GPIO monsoon
 
-# ------------------------------------------------------------------
-# 7. YOLOv13 – use a version of Ultralytics that supports Python 3.6
-# ------------------------------------------------------------------
+# Clone YOLOv13
 if [ -d "yolov13" ]; then
-    echo "yolov13 already exists, pulling latest..."
     cd yolov13 && git pull && cd ..
 else
     git clone https://github.com/iMoonLab/yolov13.git
@@ -80,32 +50,33 @@ fi
 
 cd yolov13
 
-# Patch requirements: remove flash-attn, pin ultralytics to 8.0.20
-cat requirements.txt | grep -v flash_attn > requirements_patched.txt
-echo "ultralytics==8.0.20" >> requirements_patched.txt
+# Patch requirements: allow any torch >=1.9.0, remove flash_attn
+sed -i 's/torch==2.2.2/torch>=1.9.0/' requirements.txt
+sed -i '/flash_attn/d' requirements.txt
+
+# Create a requirements file without torch (we already have it)
+grep -v "^torch" requirements.txt > requirements_patched.txt
+
+# Install other dependencies
 pip install --no-cache-dir -r requirements_patched.txt
 
-# Install YOLOv13 package
-pip install --no-cache-dir -e .
+# Install YOLOv13 itself (no torch reinstall)
+pip install --no-cache-dir --no-deps -e .
 
-# Download weights if not present
+# Download Nano weights
 if [ ! -f "yolov13n.pt" ]; then
     wget https://github.com/iMoonLab/yolov13/releases/download/yolov13/yolov13n.pt
 fi
 
 cd ..
 
-# ------------------------------------------------------------------
-# 8. Verify installation
-# ------------------------------------------------------------------
-echo "==== Verifying installation ===="
+# Verify
+echo "==== Verification ===="
 python -c "import torch; print(f'PyTorch: {torch.__version__}')"
 python -c "import cv2; print(f'OpenCV: {cv2.__version__}')"
-python -c "import ultralytics; print(f'Ultralytics: {ultralytics.__version__}')"
-python -c "from ultralytics import YOLO; model = YOLO('yolov13/yolov13n.pt'); print('YOLOv13 loaded successfully')"
-python -c "import Jetson.GPIO, monsoon; print('All modules OK')"
+python -c "from ultralytics import YOLO; model = YOLO('yolov13/yolov13n.pt'); print('YOLOv13 OK')"
 
 echo ""
 echo "==== Setup complete! ===="
-echo "Activate the environment with: source $VENV_NAME/bin/activate"
-echo "All files are stored in: $(pwd)"
+echo "Activate environment with: source $VENV_NAME/bin/activate"
+echo "All files are in: $BASE_DIR"

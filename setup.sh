@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup.sh - Uses Qengineering's PyTorch wheels (working)
+# setup.sh - Uses Qengineering Google Drive wheels
 
 set -e
 BASE_DIR="$(pwd)"
@@ -11,26 +11,23 @@ PIP_OPTS="--no-cache-dir --cache-dir $PIP_CACHE_DIR"
 sudo apt update
 sudo apt install -y build-essential git wget libopenblas-dev libatlas-base-dev \
     libusb-1.0-0-dev python3-dev python3-pip python3-venv \
-    libopenblas-base libopenmpi-dev libomp-dev \
-    libjpeg-dev zlib1g-dev libpython3-dev libavcodec-dev libavformat-dev libswscale-dev
+    libopenblas-base libopenmpi-dev libomp-dev
 
 rm -rf yolov13_env
 python3 -m venv yolov13_env --clear
 source yolov13_env/bin/activate
 
-# Install PyTorch 1.9.0 from Qengineering
-echo "Installing PyTorch 1.9.0 from Qengineering..."
-pip install $PIP_OPTS https://github.com/Qengineering/PyTorch-Jetson-Nano/raw/main/torch-1.9.0-cp36-cp36m-linux_aarch64.whl
+# Install PyTorch 1.9.0 from Qengineering Google Drive
+echo "Downloading PyTorch 1.9.0 from Qengineering..."
+wget -O torch.whl "https://drive.google.com/uc?export=download&id=1e9FDGt2zGS5C5Pms7wzHYRb0HuupngK1"
+pip install $PIP_OPTS torch.whl
+rm torch.whl
 
-# Build torchvision 0.10.0 from source
-echo "Building torchvision 0.10.0 from source..."
-if [ ! -d "torchvision" ]; then
-    git clone --branch v0.10.0 https://github.com/pytorch/vision torchvision
-fi
-cd torchvision
-export BUILD_VERSION=0.10.0
-python3 setup.py install --user
-cd ..
+# Install torchvision 0.10.0 from Qengineering Google Drive
+echo "Downloading torchvision 0.10.0 from Qengineering..."
+wget -O torchvision.whl "https://drive.google.com/uc?export=download&id=19UbYsKHhKnyeJ12VPUwcSvoxJaX7jQZ2"
+pip install $PIP_OPTS torchvision.whl
+rm torchvision.whl
 
 # Install other packages
 pip install $PIP_OPTS numpy==1.19.5 pillow==8.4.0 pandas tqdm

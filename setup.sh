@@ -1,9 +1,9 @@
 #!/bin/bash
 # setup.sh - Complete environment for YOLOv13 pipeline (Python 3.6, GPU)
-# This script installs all dependencies, patches YOLOv13 to work with PyTorch 1.9.0,
-# and sets up the virtual environment on your external media.
+# Works on Jetson Nano, JetPack 4.6, Ubuntu 18.04.
+# All files are stored in the current working directory.
 
-set -e  # Exit on any error
+set -e
 
 echo "==== Starting Jetson Nano pipeline setup (Python 3.6) ===="
 BASE_DIR="$(pwd)"
@@ -22,14 +22,14 @@ echo "Using PIP_CACHE_DIR=$PIP_CACHE_DIR"
 echo "Using TMPDIR=$TMPDIR"
 
 # ------------------------------------------------------------------
-# 2. Fix any broken system packages
+# 2. Fix broken packages (if any)
 # ------------------------------------------------------------------
 sudo apt update
 sudo apt --fix-broken install -y
 sudo apt install -f -y
 
 # ------------------------------------------------------------------
-# 3. Install minimal system libraries (no problematic multimedia packages)
+# 3. Install minimal system libraries (no multimedia conflicts)
 # ------------------------------------------------------------------
 sudo apt install -y \
     build-essential \
@@ -43,7 +43,7 @@ sudo apt install -y \
     python3-venv
 
 # ------------------------------------------------------------------
-# 4. Create a virtual environment with Python 3.6
+# 4. Create virtual environment with Python 3.6
 # ------------------------------------------------------------------
 VENV_NAME="yolov13_env"
 echo "Creating virtual environment: $VENV_NAME"
@@ -75,13 +75,16 @@ fi
 
 cd yolov13
 
-echo "Patching YOLOv13 requirements to work with PyTorch 1.9.0..."
+echo "Patching YOLOv13 requirements..."
 
-# Remove strict version pin for torch and allow any >=1.9.0
+# Remove strict version pin for torch → allow any >=1.9.0
 sed -i 's/torch==2.2.2/torch>=1.9.0/' requirements.txt
 
 # Remove flash-attention (ARM64 incompatible)
 sed -i '/flash_attn/d' requirements.txt
+
+# Downgrade timm to a Python 3.6‑compatible version (0.8.0)
+sed -i 's/timm==1.0.14/timm==0.8.0/' requirements.txt
 
 # Create a requirements file without the torch line (we already have it)
 grep -v "^torch" requirements.txt > requirements_patched.txt

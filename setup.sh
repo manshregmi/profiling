@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup.sh - Robust installation with fallback
+# setup.sh - Install PyTorch and all dependencies with direct URLs
 
 set -e
 BASE_DIR="$(pwd)"
@@ -16,27 +16,43 @@ python3 -m venv yolov13_env --clear
 source yolov13_env/bin/activate
 
 # ------------------------------------------------------------------
-# PyTorch 1.9.0 – use wget, fallback to pip -f
+# PyTorch 1.9.0 – try direct pip install from URL, then wget
 # ------------------------------------------------------------------
-echo "Installing PyTorch 1.9.0..."
-if wget -q --show-progress -O torch.whl https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl; then
-    pip install $PIP_OPTS torch.whl
-    rm torch.whl
+TORCH_URL="https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl"
+echo "Installing PyTorch 1.9.0 from $TORCH_URL..."
+if pip install $PIP_OPTS "$TORCH_URL"; then
+    echo "PyTorch installed via pip."
 else
-    echo "wget failed, trying pip with -f..."
-    pip install $PIP_OPTS torch==1.9.0 -f https://nvidia.box.com/shared/static/ssad6uxn4kcxv80e1xj99nrw3qkw5ss7.whl
+    echo "pip install failed, trying wget..."
+    if wget --no-check-certificate -q --show-progress -O torch.whl "$TORCH_URL"; then
+        pip install $PIP_OPTS torch.whl
+        rm torch.whl
+    else
+        echo "ERROR: Could not download torch wheel."
+        echo "Please manually download $TORCH_URL and place it in this folder, then run:"
+        echo "  pip install torch.whl"
+        exit 1
+    fi
 fi
 
 # ------------------------------------------------------------------
-# torchvision 0.10.0 – use wget, fallback to pip -f
+# torchvision 0.10.0
 # ------------------------------------------------------------------
-echo "Installing torchvision 0.10.0..."
-if wget -q --show-progress -O torchvision.whl https://nvidia.box.com/shared/static/4h2ltvj6s8h9o9h8w7z5e7e8e8e8e8e8.whl; then
-    pip install $PIP_OPTS torchvision.whl
-    rm torchvision.whl
+TV_URL="https://nvidia.box.com/shared/static/4h2ltvj6s8h9o9h8w7z5e7e8e8e8e8e8.whl"
+echo "Installing torchvision 0.10.0 from $TV_URL..."
+if pip install $PIP_OPTS "$TV_URL"; then
+    echo "torchvision installed via pip."
 else
-    echo "wget failed, trying pip with -f..."
-    pip install $PIP_OPTS torchvision==0.10.0 -f https://nvidia.box.com/shared/static/4h2ltvj6s8h9o9h8w7z5e7e8e8e8e8e8.whl
+    echo "pip install failed, trying wget..."
+    if wget --no-check-certificate -q --show-progress -O torchvision.whl "$TV_URL"; then
+        pip install $PIP_OPTS torchvision.whl
+        rm torchvision.whl
+    else
+        echo "ERROR: Could not download torchvision wheel."
+        echo "Please manually download $TV_URL and place it in this folder, then run:"
+        echo "  pip install torchvision.whl"
+        exit 1
+    fi
 fi
 
 # ------------------------------------------------------------------

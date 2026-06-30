@@ -6,27 +6,21 @@ from torchvision import transforms, models
 from PIL import Image
 
 # ------------------------------------------------------------
-# YOLOv5 via the 'yolov5' pip package
+# YOLOv5 via torch.hub (no ultralytics package needed)
 # ------------------------------------------------------------
-from yolov5 import YOLO
-
-def load_yolov5_model(weights='yolov5s.pt', device='cuda'):
+def load_yolov5_model(weights='yolov5s', device='cuda'):
     """
-    Load YOLOv5 using the yolov5 pip package.
-    The weights file will be automatically downloaded if not present.
+    Load YOLOv5 from torch.hub. Works with Python 3.6.
     """
-    model = YOLO(weights)
-    model = model.to(device)
+    # Ensure the hub is using the master branch (no conflicts)
+    model = torch.hub.load('ultralytics/yolov5', weights, pretrained=True, device=device)
+    model.eval()
     return model
 
 # ------------------------------------------------------------
-# Preprocessing (YOLOv5 expects RGB, but we keep your original)
+# YOLOv5 preprocessing (BGR -> RGB, resize, normalize)
 # ------------------------------------------------------------
 def yolov5_preprocess(image, target_size=640):
-    """
-    Convert BGR to RGB, resize, normalize to [0,1].
-    YOLOv5's internal model will handle the rest.
-    """
     resized = cv2.resize(image, (target_size, target_size))
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     tensor = torch.from_numpy(rgb.transpose(2,0,1)).float() / 255.0
@@ -34,7 +28,7 @@ def yolov5_preprocess(image, target_size=640):
     return tensor
 
 # ------------------------------------------------------------
-# Post-processing (same as before)
+# Detection post-processing (same as your original)
 # ------------------------------------------------------------
 def detection_postprocess_cpu(original_image, detections):
     crops = []
@@ -47,6 +41,9 @@ def detection_postprocess_cpu(original_image, detections):
             crops.append(original_image[y1:y2, x1:x2])
     return crops
 
+# ------------------------------------------------------------
+# Classification functions (unchanged)
+# ------------------------------------------------------------
 def classification_preprocess_cpu(cropped_image, target_size=224):
     resized = cv2.resize(cropped_image, (target_size, target_size))
     blurred = cv2.GaussianBlur(resized, (5, 5), 0)
@@ -75,7 +72,7 @@ def run_hybrid_timed_pipeline_yolov5(image_path, num_warmup=10):
 
     # Load YOLOv5 model
     print("Loading YOLOv5 model...")
-    detection_model = load_yolov5_model('yolov5s.pt', device='cuda')
+    detection_model = load_yolov5_model('yolov5s', device='cuda')
     detection_model = detection_model.to('cuda').eval()
 
     # Load classifiers
@@ -107,21 +104,25 @@ def run_hybrid_timed_pipeline_yolov5(image_path, num_warmup=10):
 
     start_event.record()
     with torch.no_grad():
-        # yolov5 package's YOLO returns a list of detections (per image)
-        # For a single image, we get a list of arrays.
+        # YOLOv5 via torch.hub returns a Results object with .xyxy[0] attribute
         results = detection_model(det_input_gpu)
-        # The results are a list of numpy arrays: each array is [N, 6] (x1,y1,x2,y2,conf,cls)
-        if results and len(results) > 0:
-            pred = results[0]
+        # Extract predictions
+        if hasattr(results, 'xyxy'):
+            pred = results.xyxy[0]
         else:
-            pred = np.empty((0, 6))
+            # fallback: if it's a list/tuple, take first element
+            pred = results[0].xyxy[0] if isinstance(results, tuple) else np.empty((0, 6))
     end_event.record()
     torch.cuda.synchronize()
     det_inf_time_ms = start_event.elapsed_time(end_event)
 
     t_start = time.perf_counter()
-    # Convert numpy array to list of lists
-    detections = pred.tolist() if len(pred) > 0 else []
+    if isinstance(pred, torch.Tensor):
+        detections = pred.cpu().numpy().tolist()
+    elif isinstance(pred, np.ndarray):
+        detections = pred.tolist()
+    else:
+        detections = []
     crops = detection_postprocess_cpu(original, detections)
     t_end = time.perf_counter()
     det_post_time_ms = (t_end - t_start) * 1000.0
